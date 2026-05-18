@@ -36,11 +36,11 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
 
 Supabase 클라이언트는 **절대 전역 변수에 저장하지 않는다** (Fluid compute 호환성). 매 요청/함수 호출마다 새로 생성해야 한다.
 
-| 파일 | 용도 |
-|------|------|
+| 파일                     | 용도                                                    |
+| ------------------------ | ------------------------------------------------------- |
 | `lib/supabase/server.ts` | Server Component, Route Handler, Server Action에서 사용 |
-| `lib/supabase/client.ts` | Client Component에서 사용 (`'use client'` 필요) |
-| `lib/supabase/proxy.ts` | 프록시(미들웨어)에서 세션 갱신용 |
+| `lib/supabase/client.ts` | Client Component에서 사용 (`'use client'` 필요)         |
+| `lib/supabase/proxy.ts`  | 프록시(미들웨어)에서 세션 갱신용                        |
 
 ### 프록시 (`proxy.ts`)
 

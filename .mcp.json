@@ -11,12 +11,7 @@
     "playwright": {
       "type": "stdio",
       "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
-        "-y",
-        "@playwright/mcp@latest"
-      ],
+      "args": ["/c", "npx", "-y", "@playwright/mcp@latest"],
       "env": {}
     },
     "sequential-thinking": {
@@ -33,18 +28,14 @@
     "shadcn": {
       "type": "stdio",
       "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
-        "-y",
-        "shadcn@latest",
-        "mcp"
-      ],
+      "args": ["/c", "npx", "-y", "shadcn@latest", "mcp"],
       "env": {}
     },
     "shrimp-task-manager": {
       "command": "node",
-      "args":  ["D:\\claude-code-mastery\\mcp-shrimp-task-manager\\dist\\index.js"],
+      "args": [
+        "D:\\claude-code-mastery\\mcp-shrimp-task-manager\\dist\\index.js"
+      ],
       "env": {
         "DATA_DIR": "D:\\claude-code-mastery\\nextjs-supabase-app\\shrimp_data",
         "TEMPLATES_USE": "en",
