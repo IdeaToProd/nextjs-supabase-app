@@ -1,0 +1,13 @@
+.next/
+out/
+build/
+node_modules/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+.env*
+.vercel/
+shrimp_data/
+public/
+package-lock.json
+lib/database.types.ts

@@ -10,7 +10,9 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
+  { ignores: [".next/**", "out/**", "build/**", "node_modules/**"] },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
+  ...compat.extends("prettier"), // Prettier와 충돌하는 ESLint 규칙 비활성화 (반드시 마지막)
 ];
 
 export default eslintConfig;
