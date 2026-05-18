@@ -43,3 +43,6 @@ next-env.d.ts
 
 # claude code 로컬 설정
 .claude/
+
+# shrimp task manager 런타임 데이터
+shrimp_data/
