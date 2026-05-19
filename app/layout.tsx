@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist } from "next/font/google";
+import { Poppins } from "next/font/google";
 import { Suspense } from "react";
 import { ThemeProvider } from "next-themes";
 import { Header } from "@/components/layout/header";
@@ -17,10 +17,10 @@ export const metadata: Metadata = {
   description: "소규모 모임을 위한 가장 가벼운 운영 도구",
 };
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  display: "swap",
+const poppins = Poppins({
+  variable: "--font-poppins",
   subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
 });
 
 export default function RootLayout({
@@ -30,14 +30,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko" suppressHydrationWarning>
-      {/* 모바일 앱처럼 보이도록 body에 배경색 적용 */}
       <body
-        className={`${geistSans.className} bg-muted/30 antialiased dark:bg-muted/10`}
+        className={`${poppins.variable} bg-background text-foreground font-sans antialiased`}
       >
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
+          defaultTheme="light"
+          enableSystem={false}
           disableTransitionOnChange
         >
           {/*
