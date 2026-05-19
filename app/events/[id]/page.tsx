@@ -1,13 +1,17 @@
-"use client";
+/**
+ * 이벤트 상세 페이지 (Server Component)
+ * - params.id로 이벤트 조회 (없으면 notFound)
+ * - event + owner + event_members + invite_token 조회
+ * - EventWithDetails 타입으로 조합
+ * - 4섹션 탭: 공지사항 / 참여자 / 정산 / 카풀
+ */
 
-import { useState } from "react";
+import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
   CalendarDays,
   MapPin,
   Users,
-  Copy,
-  Check,
   Bell,
   ArrowLeft,
   Plus,
@@ -30,67 +34,202 @@ import { Separator } from "@/components/ui/separator";
 import { RsvpBadge } from "@/components/common/RsvpBadge";
 import { MemberAvatar } from "@/components/common/MemberAvatar";
 import { EmptyState } from "@/components/common/EmptyState";
-import {
-  dummyEvents,
-  dummyMembers,
-  dummyNotices,
-  dummySettlements,
-  dummyCarpools,
-  formatDate,
-  formatCurrency,
-  getRoleLabel,
-} from "@/lib/dummy-data";
+import { CopyInviteLinkButton } from "@/components/events/CopyInviteLinkButton";
+import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
+import type { EventWithDetails } from "@/lib/types/events";
+
+/** 날짜를 한국어로 포맷 */
+function formatDate(isoString: string): string {
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "Asia/Seoul",
+  }).format(new Date(isoString));
+}
+
+/** 금액을 한국 원화 포맷으로 변환 */
+function formatCurrency(amount: number): string {
+  return `${amount.toLocaleString("ko-KR")}원`;
+}
+
+interface EventDetailPageProps {
+  params: Promise<{ id: string }>;
+}
+
+/**
+ * 이벤트 상세 데이터를 Supabase에서 조회합니다.
+ * event + owner + event_members + invite_token + notices + settlements + carpools
+ */
+async function fetchEventDetail(id: string): Promise<EventWithDetails | null> {
+  const supabase = await createClient();
+
+  // 이벤트 + owner 프로필 + 멤버 목록 조회
+  const { data: event, error: eventError } = await supabase
+    .from("events")
+    .select(
+      `
+      *,
+      owner:profiles!events_owner_id_fkey(id, full_name, avatar_url),
+      event_members(id, user_id, role, rsvp_status)
+    `,
+    )
+    .eq("id", id)
+    .single();
+
+  if (eventError || !event) {
+    return null;
+  }
+
+  // 현재 로그인 사용자 정보
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  // 초대 토큰 조회 (활성화된 토큰만)
+  const { data: tokenData } = await supabase
+    .from("invite_tokens")
+    .select("token")
+    .eq("event_id", id)
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+
+  // RSVP 집계
+  const members = event.event_members ?? [];
+  const rsvpCounts = {
+    attending: members.filter(
+      (m: { rsvp_status: string }) => m.rsvp_status === "attending",
+    ).length,
+    absent: members.filter(
+      (m: { rsvp_status: string }) => m.rsvp_status === "absent",
+    ).length,
+    pending: members.filter(
+      (m: { rsvp_status: string }) => m.rsvp_status === "pending",
+    ).length,
+  };
+
+  // is_past 계산 (starts_at + 24h < now)
+  const startsAt = new Date(event.starts_at);
+  const isPast =
+    new Date(startsAt.getTime() + 24 * 60 * 60 * 1000) < new Date();
+
+  // 현재 사용자의 역할 및 RSVP 상태
+  let userRole: EventWithDetails["user_role"] = null;
+  let userRsvp: EventWithDetails["user_rsvp"] = null;
+
+  if (user) {
+    const currentMember = members.find(
+      (m: { user_id: string; role: string; rsvp_status: string }) =>
+        m.user_id === user.id,
+    );
+    if (currentMember) {
+      userRole = currentMember.role as EventWithDetails["user_role"];
+      userRsvp = currentMember.rsvp_status;
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { event_members: _em, ...eventData } = event;
+
+  return {
+    ...eventData,
+    owner: event.owner ?? { id: "", full_name: null, avatar_url: null },
+    member_count: members.length,
+    rsvp_counts: rsvpCounts,
+    is_past: isPast,
+    user_role: userRole,
+    user_rsvp: userRsvp,
+    invite_token: tokenData?.token ?? null,
+  } as EventWithDetails;
+}
 
 /**
  * 이벤트 상세 페이지
- * - 상단: 이벤트 기본 정보 + 초대 링크 복사
- * - 하단: 4섹션 Tabs (공지사항 / 참여자 / 정산 / 카풀)
+ * - 이벤트 기본 정보 + 초대 링크 복사 버튼
+ * - 4섹션 탭 (공지사항 / 참여자 / 정산 / 카풀)
  */
-export default function EventDetailPage() {
-  /** 더미 이벤트 첫 번째 사용 */
-  const event = dummyEvents[0];
-  const [copied, setCopied] = useState(false);
+export default async function EventDetailPage({
+  params,
+}: EventDetailPageProps) {
+  const { id } = await params;
+  const supabase = await createClient();
 
-  /** 초대 링크 클립보드 복사 — HTTPS 미지원 환경 대응 포함 */
-  const handleCopyInviteLink = async () => {
-    const inviteUrl = `${window.location.origin}/invite/dummy-token-abc`;
-    try {
-      await navigator.clipboard.writeText(inviteUrl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // HTTP 환경, 구형 브라우저 등 클립보드 API 미지원 시 폴백
-      alert(`링크를 직접 복사해주세요:\n${inviteUrl}`);
-    }
-  };
+  const event = await fetchEventDetail(id);
 
-  /** 현재 사용자는 주최자 더미 처리 */
-  const isOwnerOrCoHost = true;
+  if (!event) {
+    notFound();
+  }
+
+  // Owner 또는 Co-host 여부 (관리 기능 표시 여부)
+  const isOwnerOrCoHost =
+    event.user_role === "owner" || event.user_role === "co-host";
+
+  // 공지사항 조회
+  const { data: notices } = await supabase
+    .from("notices")
+    .select("*")
+    .eq("event_id", id)
+    .order("created_at", { ascending: false });
+
+  // 참여자 목록 (프로필 join)
+  const { data: membersWithProfile } = await supabase
+    .from("event_members")
+    .select(
+      `
+      *,
+      profile:profiles(id, full_name, avatar_url)
+    `,
+    )
+    .eq("event_id", id)
+    .order("joined_at", { ascending: true });
+
+  // 정산 목록
+  const { data: settlements } = await supabase
+    .from("settlements")
+    .select("*")
+    .eq("event_id", id)
+    .order("created_at", { ascending: false });
+
+  // 카풀 목록 (driver 프로필 + 탑승자 join)
+  const { data: carpools } = await supabase
+    .from("carpools")
+    .select(
+      `
+      *,
+      driver:profiles!carpools_driver_id_fkey(id, full_name, avatar_url),
+      carpool_passengers(id, user_id, profile:profiles(full_name))
+    `,
+    )
+    .eq("event_id", id)
+    .order("created_at", { ascending: true });
 
   return (
     <div className="space-y-0">
-      {/* ── 뒤로 가기 ── */}
+      {/* 뒤로 가기 */}
       <div className="px-4 pt-4">
         <Link
           href="/events"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm"
         >
           <ArrowLeft className="h-4 w-4" />
           이벤트 목록
         </Link>
       </div>
 
-      {/* ── 이벤트 기본 정보 ── */}
+      {/* 이벤트 기본 정보 */}
       <section className="space-y-3 px-4 py-4">
         {/* 상태 뱃지 */}
         <div className="flex items-center gap-2">
-          <Badge
-            variant={event.status === "upcoming" ? "default" : "secondary"}
-          >
-            {event.status === "upcoming" ? "예정" : "지난 이벤트"}
+          <Badge variant={event.is_past ? "secondary" : "default"}>
+            {event.is_past ? "지난 이벤트" : "예정"}
           </Badge>
-          {!event.isPublic && (
+          {!event.is_public && (
             <Badge variant="outline" className="text-xs">
               비공개
             </Badge>
@@ -98,50 +237,45 @@ export default function EventDetailPage() {
         </div>
 
         {/* 제목 */}
-        <h1 className="text-xl font-bold leading-snug">{event.title}</h1>
+        <h1 className="text-xl leading-snug font-bold">{event.title}</h1>
 
         {/* 메타 정보 */}
         <div className="space-y-1.5">
-          <div className="flex items-start gap-2 text-sm text-muted-foreground">
+          <div className="text-muted-foreground flex items-start gap-2 text-sm">
             <CalendarDays className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{formatDate(event.date)}</span>
+            <span>{formatDate(event.starts_at)}</span>
           </div>
-          <div className="flex items-start gap-2 text-sm text-muted-foreground">
-            <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{event.location}</span>
-          </div>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          {event.location && (
+            <div className="text-muted-foreground flex items-start gap-2 text-sm">
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{event.location}</span>
+            </div>
+          )}
+          <div className="text-muted-foreground flex items-center gap-2 text-sm">
             <Users className="h-4 w-4 shrink-0" />
             <span>
-              {event.memberCount}명 참여
-              {event.maxParticipants && ` / 최대 ${event.maxParticipants}명`}
+              {event.member_count}명 참여
+              {event.capacity ? ` / 최대 ${event.capacity}명` : ""}
             </span>
           </div>
         </div>
 
         {/* 설명 */}
         {event.description && (
-          <p className="text-sm leading-relaxed text-muted-foreground">
+          <p className="text-muted-foreground text-sm leading-relaxed">
             {event.description}
           </p>
         )}
 
         {/* 버튼 행 */}
         <div className="flex gap-2 pt-1">
-          {/* 초대 링크 복사 */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleCopyInviteLink}
-            className="flex-1"
-          >
-            {copied ? (
-              <Check className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
-            ) : (
-              <Copy className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            {copied ? "복사됨" : "초대 링크 복사"}
-          </Button>
+          {/* 초대 링크 복사 — Client Component */}
+          {event.invite_token && (
+            <CopyInviteLinkButton
+              token={event.invite_token}
+              className="flex-1"
+            />
+          )}
 
           {/* 이벤트 수정 (주최자 전용) */}
           {isOwnerOrCoHost && (
@@ -154,9 +288,9 @@ export default function EventDetailPage() {
 
       <Separator />
 
-      {/* ── 4섹션 탭 ── */}
+      {/* 4섹션 탭 */}
       <Tabs defaultValue="notices" className="w-full">
-        {/* 탭 목록: 가로 스크롤 */}
+        {/* 탭 목록 */}
         <div className="overflow-x-auto border-b">
           <TabsList
             variant="line"
@@ -181,7 +315,7 @@ export default function EventDetailPage() {
           </TabsList>
         </div>
 
-        {/* ── 공지사항 탭 ── */}
+        {/* 공지사항 탭 */}
         <TabsContent value="notices" className="space-y-3 px-4 py-4">
           {isOwnerOrCoHost && (
             <Button size="sm" className="w-full">
@@ -190,20 +324,19 @@ export default function EventDetailPage() {
             </Button>
           )}
 
-          {dummyNotices.length > 0 ? (
+          {notices && notices.length > 0 ? (
             <div className="space-y-3">
-              {dummyNotices.map((notice) => (
+              {notices.map((notice) => (
                 <Card key={notice.id}>
-                  <CardHeader className="pb-2 pt-4">
+                  <CardHeader className="pt-4 pb-2">
                     <CardTitle className="text-sm">{notice.title}</CardTitle>
-                    <p className="text-xs text-muted-foreground">
-                      {notice.authorName} ·{" "}
-                      {new Date(notice.createdAt).toLocaleDateString("ko-KR")}
+                    <p className="text-muted-foreground text-xs">
+                      {new Date(notice.created_at).toLocaleDateString("ko-KR")}
                     </p>
                   </CardHeader>
                   <CardContent className="pb-4">
-                    <p className="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
-                      {notice.content}
+                    <p className="text-muted-foreground line-clamp-3 text-xs leading-relaxed">
+                      {notice.body}
                     </p>
                   </CardContent>
                 </Card>
@@ -218,78 +351,99 @@ export default function EventDetailPage() {
           )}
         </TabsContent>
 
-        {/* ── 참여자 탭 ── */}
+        {/* 참여자 탭 */}
         <TabsContent value="members" className="space-y-4 px-4 py-4">
           {/* RSVP 요약 카드 */}
           <div className="grid grid-cols-3 gap-2">
             {[
               {
                 label: "참석",
-                count: event.rsvpCounts.attending,
+                count: event.rsvp_counts.attending,
                 color: "text-emerald-600 dark:text-emerald-400",
               },
               {
                 label: "불참",
-                count: event.rsvpCounts.absent,
+                count: event.rsvp_counts.absent,
                 color: "text-red-500 dark:text-red-400",
               },
               {
                 label: "미정",
-                count: event.rsvpCounts.pending,
+                count: event.rsvp_counts.pending,
                 color: "text-muted-foreground",
               },
             ].map(({ label, count, color }) => (
               <Card key={label} className="text-center">
                 <CardContent className="py-3">
                   <p className={cn("text-xl font-bold", color)}>{count}</p>
-                  <p className="text-xs text-muted-foreground">{label}</p>
+                  <p className="text-muted-foreground text-xs">{label}</p>
                 </CardContent>
               </Card>
             ))}
           </div>
 
-          {/* 본인 RSVP 변경 버튼 */}
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="flex-1 text-xs">
-              참석으로 변경
-            </Button>
-            <Button variant="outline" size="sm" className="flex-1 text-xs">
-              불참으로 변경
-            </Button>
-          </div>
+          {/* 본인 RSVP 변경 버튼 (멤버인 경우) */}
+          {event.user_role && (
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="flex-1 text-xs">
+                참석으로 변경
+              </Button>
+              <Button variant="outline" size="sm" className="flex-1 text-xs">
+                불참으로 변경
+              </Button>
+            </div>
+          )}
 
           {/* 멤버 테이블 */}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">이름</TableHead>
-                <TableHead className="text-xs">역할</TableHead>
-                <TableHead className="text-xs">RSVP</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {dummyMembers.map((member) => (
-                <TableRow key={member.id}>
-                  <TableCell className="py-2">
-                    <MemberAvatar
-                      name={member.name}
-                      avatarUrl={member.avatarUrl}
-                      size="sm"
-                    />
-                  </TableCell>
-                  <TableCell className="py-2 text-xs text-muted-foreground">
-                    {getRoleLabel(member.role)}
-                  </TableCell>
-                  <TableCell className="py-2">
-                    <RsvpBadge rsvp={member.rsvp} />
-                  </TableCell>
+          {membersWithProfile && membersWithProfile.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs">이름</TableHead>
+                  <TableHead className="text-xs">역할</TableHead>
+                  <TableHead className="text-xs">RSVP</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {membersWithProfile.map((member) => {
+                  const profile = member.profile as {
+                    full_name: string | null;
+                    avatar_url: string | null;
+                  } | null;
+                  const displayName = profile?.full_name ?? "알 수 없음";
+                  return (
+                    <TableRow key={member.id}>
+                      <TableCell className="py-2">
+                        <MemberAvatar
+                          name={displayName}
+                          avatarUrl={profile?.avatar_url}
+                          size="sm"
+                        />
+                      </TableCell>
+                      <TableCell className="text-muted-foreground py-2 text-xs">
+                        {member.role === "owner"
+                          ? "주최자"
+                          : member.role === "co-host"
+                            ? "공동주최"
+                            : "참여자"}
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <RsvpBadge rsvp={member.rsvp_status} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <EmptyState
+              icon={Users}
+              title="참여자가 없어요"
+              description="초대 링크를 공유해 멤버를 초대해보세요."
+            />
+          )}
         </TabsContent>
 
-        {/* ── 정산 탭 ── */}
+        {/* 정산 탭 */}
         <TabsContent value="settlements" className="space-y-3 px-4 py-4">
           {isOwnerOrCoHost && (
             <Button size="sm" className="w-full">
@@ -298,9 +452,9 @@ export default function EventDetailPage() {
             </Button>
           )}
 
-          {dummySettlements.length > 0 ? (
+          {settlements && settlements.length > 0 ? (
             <div className="space-y-3">
-              {dummySettlements.map((settlement) => (
+              {settlements.map((settlement) => (
                 <Card key={settlement.id}>
                   <CardContent className="py-4">
                     <div className="flex items-start justify-between">
@@ -308,25 +462,25 @@ export default function EventDetailPage() {
                         <p className="text-sm font-semibold">
                           {settlement.title}
                         </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {settlement.participantCount}명 기준 ·{" "}
-                          {new Date(settlement.createdAt).toLocaleDateString(
+                        <p className="text-muted-foreground mt-0.5 text-xs">
+                          {settlement.snapshot_member_count}명 기준 ·{" "}
+                          {new Date(settlement.created_at).toLocaleDateString(
                             "ko-KR",
                           )}
                         </p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs text-muted-foreground">1인당</p>
-                        <p className="text-base font-bold text-primary">
-                          {formatCurrency(settlement.perPersonAmount)}
+                        <p className="text-muted-foreground text-xs">1인당</p>
+                        <p className="text-primary text-base font-bold">
+                          {formatCurrency(settlement.per_person_amount)}
                         </p>
                       </div>
                     </div>
                     <Separator className="my-2" />
-                    <div className="flex justify-between text-xs text-muted-foreground">
+                    <div className="text-muted-foreground flex justify-between text-xs">
                       <span>총액</span>
-                      <span className="font-medium text-foreground">
-                        {formatCurrency(settlement.totalAmount)}
+                      <span className="text-foreground font-medium">
+                        {formatCurrency(settlement.total_amount)}
                       </span>
                     </div>
                   </CardContent>
@@ -342,7 +496,7 @@ export default function EventDetailPage() {
           )}
         </TabsContent>
 
-        {/* ── 카풀 탭 ── */}
+        {/* 카풀 탭 */}
         <TabsContent value="carpools" className="space-y-3 px-4 py-4">
           {isOwnerOrCoHost && (
             <Button size="sm" className="w-full">
@@ -351,58 +505,70 @@ export default function EventDetailPage() {
             </Button>
           )}
 
-          {dummyCarpools.length > 0 ? (
+          {carpools && carpools.length > 0 ? (
             <div className="space-y-3">
-              {dummyCarpools.map((carpool) => (
-                <Card key={carpool.id}>
-                  <CardContent className="space-y-2 py-4">
-                    {/* 운전자 정보 */}
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-semibold">
-                          {carpool.driverName}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          출발: {carpool.departure}
-                        </p>
-                      </div>
-                      <Badge variant="outline" className="text-xs">
-                        {carpool.passengers.length}/{carpool.seats}석
-                      </Badge>
-                    </div>
-
-                    {/* 탑승자 목록 */}
-                    {carpool.passengers.length > 0 && (
-                      <>
-                        <Separator />
+              {carpools.map((carpool) => {
+                const driver = carpool.driver as {
+                  full_name: string | null;
+                } | null;
+                const passengers = (carpool.carpool_passengers ?? []) as Array<{
+                  id: string;
+                  user_id: string;
+                  profile: { full_name: string | null } | null;
+                }>;
+                return (
+                  <Card key={carpool.id}>
+                    <CardContent className="space-y-2 py-4">
+                      {/* 운전자 정보 */}
+                      <div className="flex items-center justify-between">
                         <div>
-                          <p className="mb-1.5 text-xs text-muted-foreground">
-                            탑승자
+                          <p className="text-sm font-semibold">
+                            {driver?.full_name ?? "알 수 없음"}
                           </p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {carpool.passengers.map((p) => (
-                              <span
-                                key={p.id}
-                                className="rounded-md border bg-muted px-2 py-0.5 text-xs"
-                              >
-                                {p.name}
-                              </span>
-                            ))}
-                          </div>
+                          {carpool.departure_location && (
+                            <p className="text-muted-foreground text-xs">
+                              출발: {carpool.departure_location}
+                            </p>
+                          )}
                         </div>
-                      </>
-                    )}
+                        <Badge variant="outline" className="text-xs">
+                          {passengers.length}/{carpool.seat_count}석
+                        </Badge>
+                      </div>
 
-                    {/* 빈 좌석 안내 */}
-                    {carpool.passengers.length < carpool.seats && (
-                      <p className="text-xs text-emerald-600 dark:text-emerald-400">
-                        빈 좌석 {carpool.seats - carpool.passengers.length}개
-                        있음
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
+                      {/* 탑승자 목록 */}
+                      {passengers.length > 0 && (
+                        <>
+                          <Separator />
+                          <div>
+                            <p className="text-muted-foreground mb-1.5 text-xs">
+                              탑승자
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {passengers.map((p) => (
+                                <span
+                                  key={p.id}
+                                  className="bg-muted rounded-md border px-2 py-0.5 text-xs"
+                                >
+                                  {p.profile?.full_name ?? "알 수 없음"}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {/* 빈 좌석 안내 */}
+                      {passengers.length < carpool.seat_count && (
+                        <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                          빈 좌석 {carpool.seat_count - passengers.length}개
+                          있음
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           ) : (
             <EmptyState

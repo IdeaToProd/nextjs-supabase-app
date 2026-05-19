@@ -1,7 +1,13 @@
+/**
+ * 멤버 아바타 컴포넌트
+ * 아바타 이미지 + 이름 + 역할을 함께 표시
+ */
+
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import { getRoleLabel } from "@/lib/dummy-data";
-import type { Member } from "@/lib/dummy-data";
+
+/** 역할 타입 */
+type MemberRole = "owner" | "co-host" | "participant";
 
 interface MemberAvatarProps {
   /** 표시할 이름 */
@@ -11,12 +17,24 @@ interface MemberAvatarProps {
   /** 아바타 이미지 URL */
   avatarUrl?: string | null;
   /** 역할 (선택) */
-  role?: Member["role"];
+  role?: MemberRole | string;
   /** 아바타 크기 */
   size?: "sm" | "default" | "lg";
   /** 레이아웃 방향: 가로(row) / 세로(col) */
   direction?: "row" | "col";
   className?: string;
+}
+
+/**
+ * 역할 레이블 반환
+ */
+function getRoleLabel(role: string): string {
+  const labels: Record<string, string> = {
+    owner: "주최자",
+    "co-host": "공동주최",
+    participant: "참여자",
+  };
+  return labels[role] ?? role;
 }
 
 /**
@@ -58,12 +76,12 @@ export function MemberAvatar({
       <div
         className={cn("flex flex-col", direction === "col" && "items-center")}
       >
-        <span className="text-sm font-medium leading-tight">{name}</span>
+        <span className="text-sm leading-tight font-medium">{name}</span>
         {email && (
-          <span className="text-xs text-muted-foreground">{email}</span>
+          <span className="text-muted-foreground text-xs">{email}</span>
         )}
         {role && (
-          <span className="text-xs text-muted-foreground">
+          <span className="text-muted-foreground text-xs">
             {getRoleLabel(role)}
           </span>
         )}
