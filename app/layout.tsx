@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { ThemeProvider } from "next-themes";
 import { Header } from "@/components/layout/header";
 import { BottomTabBar } from "@/components/layout/bottom-tab-bar";
+import { RootShell } from "@/components/layout/RootShell";
 import "./globals.css";
 
 const defaultUrl = process.env.VERCEL_URL
@@ -39,16 +40,25 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {/* 모바일 최적화 폭 (430px) 중앙 정렬 컨테이너 */}
-          <div className="mx-auto min-h-screen max-w-[520px] bg-background">
-            <Suspense>
-              <Header />
-            </Suspense>
-            <main className="pb-16">{children}</main>
-          </div>
-          <Suspense>
-            <BottomTabBar />
-          </Suspense>
+          {/*
+           * RootShell: 경로별 레이아웃 분기
+           * - 일반 경로: 모바일 최적화 폭(520px) + Header + BottomTabBar
+           * - 어드민 경로(/admin): 풀 와이드 레이아웃 (어드민 자체 헤더 사용)
+           */}
+          <RootShell
+            header={
+              <Suspense>
+                <Header />
+              </Suspense>
+            }
+            bottomTab={
+              <Suspense>
+                <BottomTabBar />
+              </Suspense>
+            }
+          >
+            {children}
+          </RootShell>
         </ThemeProvider>
       </body>
     </html>
