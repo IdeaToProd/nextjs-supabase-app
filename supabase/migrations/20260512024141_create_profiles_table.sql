@@ -1,0 +1,3 @@
+-- 기존 원격 마이그레이션 placeholder (Phase 0 인증 시스템)
+-- 원본은 Supabase 콘솔에 이미 적용 완료된 상태.
+-- 본 파일은 supabase CLI가 이 timestamp를 기적용된 것으로 인식하도록 placeholder 역할만 함.
