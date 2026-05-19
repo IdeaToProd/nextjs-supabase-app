@@ -46,3 +46,6 @@ next-env.d.ts
 
 # shrimp task manager 런타임 데이터
 shrimp_data/
+
+# playwright mcp 테스트 아티팩트
+.playwright-mcp/
