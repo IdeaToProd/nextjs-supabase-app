@@ -15,6 +15,10 @@ export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
   title: "모이다",
   description: "소규모 모임을 위한 가장 가벼운 운영 도구",
+  icons: {
+    icon: "/icon.png",
+    apple: "/apple-icon.png",
+  },
 };
 
 const poppins = Poppins({
