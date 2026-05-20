@@ -166,6 +166,21 @@ export default async function EventDetailPage({
     notFound();
   }
 
+  // 비공개 이벤트 접근 제어: 멤버가 아닌 경우 제한 메시지 표시
+  // (404 노출 금지 — 이벤트 존재 여부를 외부에 노출하지 않기 위함)
+  if (!event.is_public && event.user_role === null) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 px-4 py-20 text-center">
+        <p className="text-muted-foreground text-sm">
+          이 이벤트는 초대 링크로만 접근할 수 있습니다.
+        </p>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/events">이벤트 목록으로</Link>
+        </Button>
+      </div>
+    );
+  }
+
   // Owner 또는 Co-host 여부 (관리 기능 표시 여부)
   const isOwnerOrCoHost =
     event.user_role === "owner" || event.user_role === "co_host";

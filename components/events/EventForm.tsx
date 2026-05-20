@@ -35,13 +35,20 @@ interface EventFormProps {
 }
 
 /**
- * ISO 문자열을 datetime-local input 형식으로 변환
- * 예) "2025-12-28T18:00:00+09:00" → "2025-12-28T18:00"
+ * UTC ISO 문자열을 브라우저 로컬 시간 기준 datetime-local 형식으로 변환
+ * new Date()가 UTC → 로컬 시간대(KST 등)로 자동 변환하므로
+ * getHours() / getMinutes()는 로컬 시간을 반환합니다.
+ * 예) "2025-12-28T09:00:00.000Z" (UTC) → "2025-12-28T18:00" (KST)
  */
 function toDatetimeLocalValue(isoString?: string): string {
   if (!isoString) return "";
-  // UTC 변환 없이 날짜/시간 부분만 슬라이스
-  return isoString.slice(0, 16);
+  const date = new Date(isoString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
 /**
