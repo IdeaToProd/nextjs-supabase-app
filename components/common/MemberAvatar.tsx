@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 
 /** 역할 타입 */
-type MemberRole = "owner" | "co-host" | "participant";
+type MemberRole = "owner" | "co_host" | "participant";
 
 interface MemberAvatarProps {
   /** 표시할 이름 */
@@ -31,7 +31,7 @@ interface MemberAvatarProps {
 function getRoleLabel(role: string): string {
   const labels: Record<string, string> = {
     owner: "주최자",
-    "co-host": "공동주최",
+    co_host: "공동주최",
     participant: "참여자",
   };
   return labels[role] ?? role;

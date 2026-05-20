@@ -168,7 +168,7 @@ export default async function EventDetailPage({
 
   // Owner 또는 Co-host 여부 (관리 기능 표시 여부)
   const isOwnerOrCoHost =
-    event.user_role === "owner" || event.user_role === "co-host";
+    event.user_role === "owner" || event.user_role === "co_host";
 
   // 공지사항 조회
   const { data: notices } = await supabase
@@ -422,7 +422,7 @@ export default async function EventDetailPage({
                       <TableCell className="text-muted-foreground py-2 text-xs">
                         {member.role === "owner"
                           ? "주최자"
-                          : member.role === "co-host"
+                          : member.role === "co_host"
                             ? "공동주최"
                             : "참여자"}
                       </TableCell>

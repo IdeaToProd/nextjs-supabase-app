@@ -35,7 +35,7 @@ export interface Member {
   email: string;
   /** null이면 플레이스홀더 표시 */
   avatarUrl: string | null;
-  role: "owner" | "co-host" | "participant";
+  role: "owner" | "co_host" | "participant";
   rsvp: "attending" | "absent" | "pending";
   joinedAt: string;
 }
@@ -247,7 +247,7 @@ export const dummyMembers: Member[] = [
     name: "박민준",
     email: "minjun.park@example.com",
     avatarUrl: null,
-    role: "co-host",
+    role: "co_host",
     rsvp: "attending",
     joinedAt: "2025-11-02T10:30:00+09:00",
   },
@@ -509,7 +509,7 @@ export function getRsvpLabel(rsvp: Member["rsvp"]): string {
 export function getRoleLabel(role: Member["role"]): string {
   const labels: Record<Member["role"], string> = {
     owner: "주최자",
-    "co-host": "공동주최",
+    co_host: "공동주최",
     participant: "참여자",
   };
   return labels[role];

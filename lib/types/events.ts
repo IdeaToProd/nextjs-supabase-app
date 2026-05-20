@@ -23,7 +23,7 @@ export type EventWithDetails = DbEvent & {
   /** starts_at + 24h < now 이면 true (지난 이벤트) */
   is_past: boolean;
   /** 현재 로그인 사용자의 역할 — 비로그인 시 null */
-  user_role: "owner" | "co-host" | "participant" | null;
+  user_role: "owner" | "co_host" | "participant" | null;
   /** 현재 로그인 사용자의 RSVP 상태 — 비로그인이거나 멤버 아닐 시 null */
   user_rsvp: DbEventMember["rsvp_status"] | null;
   /** 활성화된 초대 토큰 — 주최자가 아닐 시 null */
