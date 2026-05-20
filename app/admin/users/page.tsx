@@ -1,10 +1,13 @@
-"use client";
+/**
+ * 어드민 회원 목록 페이지 (Server Component)
+ * - Supabase profiles 테이블 실제 데이터 조회
+ * - 이름/이메일 ilike 검색
+ * - 서버 사이드 페이지네이션 (PAGE_SIZE=10)
+ * - AdminSearchInput으로 URL q 파라미터 기반 검색
+ */
 
-import { useState } from "react";
-import { Search } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -13,44 +16,56 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { dummyUsers } from "@/lib/dummy-data";
-import type { UserProfile } from "@/lib/dummy-data";
-import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/server";
+import AdminSearchInput from "@/components/admin/AdminSearchInput";
 
 /** 페이지당 표시 개수 */
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 10;
+
+interface PageProps {
+  searchParams: Promise<{ q?: string; page?: string }>;
+}
 
 /**
- * 어드민 회원 목록 페이지
- * - 이름/이메일 검색
- * - 회원 테이블 (이름, 이메일, 가입일, 관리자 여부)
- * - 페이지네이션
+ * 회원 목록 서버 컴포넌트
+ * searchParams에서 q(검색어), page(현재 페이지) 추출
  */
-export default function AdminUsersPage() {
-  const [query, setQuery] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
+export default async function AdminUsersPage({ searchParams }: PageProps) {
+  const { q, page: pageParam } = await searchParams;
 
-  /** 검색어 필터 */
-  const filtered: UserProfile[] = dummyUsers.filter((user) => {
-    if (!query) return true;
-    const q = query.toLowerCase();
-    return (
-      user.name.toLowerCase().includes(q) ||
-      user.email.toLowerCase().includes(q)
-    );
-  });
+  const currentPage = Math.max(1, parseInt(pageParam ?? "1", 10));
+  const offset = (currentPage - 1) * PAGE_SIZE;
 
-  /** 페이지네이션 계산 */
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE,
-  );
+  const supabase = await createClient();
 
-  /** 검색 시 첫 페이지로 이동 */
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setQuery(e.target.value);
-    setCurrentPage(1);
+  // profiles 조회 (count: 'exact'로 전체 건수 확인)
+  let query = supabase
+    .from("profiles")
+    .select("id, full_name, email, is_admin, created_at", { count: "exact" })
+    .order("created_at", { ascending: false })
+    .range(offset, offset + PAGE_SIZE - 1);
+
+  // 검색어가 있으면 이름 또는 이메일 ilike 필터 적용
+  if (q) {
+    query = query.or(`full_name.ilike.%${q}%,email.ilike.%${q}%`);
+  }
+
+  const { data: users, count, error } = await query;
+
+  if (error) {
+    throw new Error(`회원 목록 조회 실패: ${error.message}`);
+  }
+
+  const totalCount = count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
+  /** 페이지네이션 링크 URL 생성 (현재 검색어 유지) */
+  const buildPageUrl = (p: number) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (p > 1) params.set("page", String(p));
+    const qs = params.toString();
+    return `/admin/users${qs ? `?${qs}` : ""}`;
   };
 
   return (
@@ -58,23 +73,17 @@ export default function AdminUsersPage() {
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">회원 관리</h1>
-        <span className="text-sm text-muted-foreground">
-          전체 {dummyUsers.length}명
+        <span className="text-muted-foreground text-sm">
+          전체 {totalCount}명
         </span>
       </div>
 
-      {/* 검색 Input */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          type="search"
-          placeholder="이름 또는 이메일로 검색..."
-          value={query}
-          onChange={handleSearch}
-          className="pl-9"
-          aria-label="회원 검색"
-        />
-      </div>
+      {/* 검색 Input (Client Component) */}
+      <AdminSearchInput
+        placeholder="이름 또는 이메일로 검색..."
+        paramName="q"
+        defaultValue={q ?? ""}
+      />
 
       {/* 회원 테이블 */}
       <div className="rounded-lg border">
@@ -85,46 +94,41 @@ export default function AdminUsersPage() {
               <TableHead className="text-xs">이메일</TableHead>
               <TableHead className="text-xs">가입일</TableHead>
               <TableHead className="text-xs">관리자</TableHead>
-              <TableHead className="text-xs">참여 이벤트</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {paginated.length > 0 ? (
-              paginated.map((user) => (
+            {users && users.length > 0 ? (
+              users.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell className="py-3 font-medium">
-                    {user.name}
+                    {user.full_name ?? "-"}
                   </TableCell>
-                  <TableCell className="py-3 text-sm text-muted-foreground">
+                  <TableCell className="text-muted-foreground py-3 text-sm">
                     {user.email}
                   </TableCell>
-                  <TableCell className="py-3 text-sm text-muted-foreground">
-                    {new Date(user.joinedAt).toLocaleDateString("ko-KR")}
+                  <TableCell className="text-muted-foreground py-3 text-sm">
+                    {new Date(user.created_at).toLocaleDateString("ko-KR")}
                   </TableCell>
                   <TableCell className="py-3">
-                    {user.isAdmin ? (
+                    {user.is_admin ? (
                       <Badge variant="default" className="text-xs">
                         관리자
                       </Badge>
                     ) : (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-muted-foreground text-xs">
                         일반
                       </span>
                     )}
-                  </TableCell>
-                  <TableCell className="py-3 text-sm text-muted-foreground">
-                    {/* 더미: 임의 숫자 */}
-                    {Math.floor(Math.random() * 8 + 1)}개
                   </TableCell>
                 </TableRow>
               ))
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={5}
-                  className="py-10 text-center text-sm text-muted-foreground"
+                  colSpan={4}
+                  className="text-muted-foreground py-10 text-center text-sm"
                 >
-                  검색 결과가 없습니다
+                  {q ? "검색 결과가 없습니다" : "등록된 회원이 없습니다"}
                 </TableCell>
               </TableRow>
             )}
@@ -132,47 +136,43 @@ export default function AdminUsersPage() {
         </Table>
       </div>
 
-      {/* 페이지네이션 */}
+      {/* 페이지네이션 (Link 기반 — 서버 컴포넌트 호환) */}
       {totalPages > 1 && (
-        <div
+        <nav
           className="flex items-center justify-center gap-1"
-          role="navigation"
           aria-label="페이지 이동"
         >
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-            className="text-xs"
-          >
-            이전
-          </Button>
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-            <Button
-              key={page}
-              variant={currentPage === page ? "default" : "outline"}
-              size="sm"
-              onClick={() => setCurrentPage(page)}
-              className={cn(
-                "min-w-8 text-xs",
-                currentPage === page && "pointer-events-none",
-              )}
-              aria-current={currentPage === page ? "page" : undefined}
+          {currentPage > 1 && (
+            <Link
+              href={buildPageUrl(currentPage - 1)}
+              className="hover:bg-muted rounded border px-3 py-1.5 text-xs"
             >
-              {page}
-            </Button>
+              이전
+            </Link>
+          )}
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+            <Link
+              key={p}
+              href={buildPageUrl(p)}
+              aria-current={currentPage === p ? "page" : undefined}
+              className={
+                currentPage === p
+                  ? "bg-primary text-primary-foreground pointer-events-none rounded px-3 py-1.5 text-xs"
+                  : "hover:bg-muted rounded border px-3 py-1.5 text-xs"
+              }
+            >
+              {p}
+            </Link>
           ))}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
-            className="text-xs"
-          >
-            다음
-          </Button>
-        </div>
+          {currentPage < totalPages && (
+            <Link
+              href={buildPageUrl(currentPage + 1)}
+              className="hover:bg-muted rounded border px-3 py-1.5 text-xs"
+            >
+              다음
+            </Link>
+          )}
+        </nav>
       )}
     </div>
   );

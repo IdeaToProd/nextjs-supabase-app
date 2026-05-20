@@ -1,18 +1,15 @@
-"use client";
+/**
+ * 어드민 이벤트 목록 페이지 (Server Component)
+ * - Supabase events 테이블 실제 데이터 조회
+ * - 제목 ilike 검색, 상태(예정/지난) 필터
+ * - 서버 사이드 페이지네이션 (PAGE_SIZE=10)
+ * - 지난 이벤트 기준: starts_at + 24h < now (CLAUDE.md 비즈니스 규칙)
+ */
 
-import { useState } from "react";
 import Link from "next/link";
-import { Search, ExternalLink } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -21,55 +18,85 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { dummyEvents, formatDateShort } from "@/lib/dummy-data";
-import type { Event } from "@/lib/dummy-data";
-import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/server";
+import AdminSearchInput from "@/components/admin/AdminSearchInput";
+import AdminStatusFilter from "@/components/admin/AdminStatusFilter";
 
 /** 페이지당 표시 개수 */
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 10;
 
-/** 상태 필터 타입 */
-type StatusFilter = "all" | "upcoming" | "past";
+interface PageProps {
+  searchParams: Promise<{ q?: string; status?: string; page?: string }>;
+}
 
 /**
- * 어드민 이벤트 목록 페이지
- * - 검색 Input + 상태 필터 Select
- * - 이벤트 테이블 (제목, 주최자, 날짜, 장소, 멤버 수, 상태, 상세 보기)
- * - 페이지네이션
+ * 이벤트 목록 서버 컴포넌트
+ * searchParams에서 q(검색어), status(상태 필터), page(페이지) 추출
  */
-export default function AdminEventsPage() {
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [currentPage, setCurrentPage] = useState(1);
+export default async function AdminEventsPage({ searchParams }: PageProps) {
+  const { q, status, page: pageParam } = await searchParams;
 
-  /** 검색어 + 상태 필터 적용 */
-  const filtered: Event[] = dummyEvents.filter((event) => {
-    const q = query.toLowerCase();
-    const matchesQuery =
-      !query ||
-      event.title.toLowerCase().includes(q) ||
-      event.ownerName.toLowerCase().includes(q);
-    const matchesStatus =
-      statusFilter === "all" || event.status === statusFilter;
-    return matchesQuery && matchesStatus;
-  });
+  const currentPage = Math.max(1, parseInt(pageParam ?? "1", 10));
+  const offset = (currentPage - 1) * PAGE_SIZE;
 
-  /** 페이지네이션 계산 */
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice(
-    (currentPage - 1) * PAGE_SIZE,
-    currentPage * PAGE_SIZE,
-  );
+  // 지난 이벤트 기준: starts_at + 24h 이전 (CLAUDE.md 비즈니스 규칙)
+  const pastThreshold = new Date(
+    Date.now() - 24 * 60 * 60 * 1000,
+  ).toISOString();
 
-  /** 검색/필터 변경 시 첫 페이지로 */
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setQuery(e.target.value);
-    setCurrentPage(1);
+  const supabase = await createClient();
+
+  // events + owner 프로필 join 조회
+  let query = supabase
+    .from("events")
+    .select(
+      "id, title, starts_at, location, owner:profiles!events_owner_id_fkey(full_name)",
+      { count: "exact" },
+    )
+    .order("starts_at", { ascending: false })
+    .range(offset, offset + PAGE_SIZE - 1);
+
+  // 제목 검색 필터
+  if (q) {
+    query = query.ilike("title", `%${q}%`);
+  }
+
+  // 상태 필터 (지난 이벤트 기준: starts_at + 24h < now)
+  if (status === "upcoming") {
+    query = query.gt("starts_at", pastThreshold);
+  } else if (status === "past") {
+    query = query.lte("starts_at", pastThreshold);
+  }
+
+  const { data: rawEvents, count, error } = await query;
+
+  // Supabase join 타입을 명시적으로 캐스팅 (owner는 단일 객체)
+  const events = rawEvents as
+    | (Omit<NonNullable<typeof rawEvents>[number], "owner"> & {
+        owner: { full_name: string | null } | null;
+      })[]
+    | null;
+
+  if (error) {
+    throw new Error(`이벤트 목록 조회 실패: ${error.message}`);
+  }
+
+  const totalCount = count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
+  /** 페이지네이션 링크 URL 생성 (현재 검색어·필터 유지) */
+  const buildPageUrl = (p: number) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (status && status !== "all") params.set("status", status);
+    if (p > 1) params.set("page", String(p));
+    const qs = params.toString();
+    return `/admin/events${qs ? `?${qs}` : ""}`;
   };
 
-  const handleStatusChange = (val: string) => {
-    setStatusFilter(val as StatusFilter);
-    setCurrentPage(1);
+  /** 이벤트 상태 판별 (starts_at + 24h < now이면 지난 이벤트) */
+  const isEventPast = (startsAt: string) => {
+    return new Date(startsAt).getTime() < Date.now() - 24 * 60 * 60 * 1000;
   };
 
   return (
@@ -77,37 +104,22 @@ export default function AdminEventsPage() {
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold">이벤트 관리</h1>
-        <span className="text-sm text-muted-foreground">
-          전체 {dummyEvents.length}개
+        <span className="text-muted-foreground text-sm">
+          전체 {totalCount}개
         </span>
       </div>
 
-      {/* 검색 + 필터 행 */}
+      {/* 검색 + 상태 필터 행 */}
       <div className="flex flex-col gap-2 sm:flex-row">
-        {/* 검색 Input */}
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder="이벤트명, 주최자로 검색..."
-            value={query}
-            onChange={handleSearch}
-            className="pl-9"
-            aria-label="이벤트 검색"
-          />
-        </div>
+        {/* 검색 Input (Client Component) */}
+        <AdminSearchInput
+          placeholder="이벤트명으로 검색..."
+          paramName="q"
+          defaultValue={q ?? ""}
+        />
 
-        {/* 상태 필터 */}
-        <Select value={statusFilter} onValueChange={handleStatusChange}>
-          <SelectTrigger className="w-full sm:w-36" aria-label="상태 필터">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">전체</SelectItem>
-            <SelectItem value="upcoming">예정</SelectItem>
-            <SelectItem value="past">지난 이벤트</SelectItem>
-          </SelectContent>
-        </Select>
+        {/* 상태 필터 (Client Component) */}
+        <AdminStatusFilter />
       </div>
 
       {/* 이벤트 테이블 */}
@@ -123,66 +135,70 @@ export default function AdminEventsPage() {
               <TableHead className="hidden text-xs lg:table-cell">
                 장소
               </TableHead>
-              <TableHead className="text-xs">멤버</TableHead>
               <TableHead className="text-xs">상태</TableHead>
               <TableHead className="text-xs">상세</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {paginated.length > 0 ? (
-              paginated.map((event) => (
-                <TableRow key={event.id}>
-                  <TableCell className="py-3">
-                    <p className="line-clamp-1 text-sm font-medium">
-                      {event.title}
-                    </p>
-                  </TableCell>
-                  <TableCell className="py-3 text-sm text-muted-foreground">
-                    {event.ownerName}
-                  </TableCell>
-                  <TableCell className="hidden py-3 text-sm text-muted-foreground sm:table-cell">
-                    {formatDateShort(event.date)}
-                  </TableCell>
-                  <TableCell className="hidden py-3 text-sm text-muted-foreground lg:table-cell">
-                    <span className="line-clamp-1">{event.location}</span>
-                  </TableCell>
-                  <TableCell className="py-3 text-sm text-muted-foreground">
-                    {event.memberCount}명
-                  </TableCell>
-                  <TableCell className="py-3">
-                    <Badge
-                      variant={
-                        event.status === "upcoming" ? "default" : "secondary"
-                      }
-                      className="text-xs"
-                    >
-                      {event.status === "upcoming" ? "예정" : "지난"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="py-3">
-                    <Button
-                      asChild
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7"
-                    >
-                      <Link
-                        href={`/admin/events/${event.id}`}
-                        aria-label="상세 보기"
+            {events && events.length > 0 ? (
+              events.map((event) => {
+                const past = isEventPast(event.starts_at);
+                // owner join 결과에서 이름 추출
+                const ownerName = event.owner?.full_name ?? "-";
+
+                return (
+                  <TableRow key={event.id}>
+                    <TableCell className="py-3">
+                      <p className="line-clamp-1 text-sm font-medium">
+                        {event.title}
+                      </p>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground py-3 text-sm">
+                      {ownerName}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground hidden py-3 text-sm sm:table-cell">
+                      {new Date(event.starts_at).toLocaleDateString("ko-KR")}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground hidden py-3 text-sm lg:table-cell">
+                      <span className="line-clamp-1">
+                        {event.location ?? "-"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-3">
+                      <Badge
+                        variant={past ? "secondary" : "default"}
+                        className="text-xs"
                       >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </Link>
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
+                        {past ? "지난" : "예정"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="py-3">
+                      <Button
+                        asChild
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                      >
+                        <Link
+                          href={`/admin/events/${event.id}`}
+                          aria-label="상세 보기"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={7}
-                  className="py-10 text-center text-sm text-muted-foreground"
+                  colSpan={6}
+                  className="text-muted-foreground py-10 text-center text-sm"
                 >
-                  검색 결과가 없습니다
+                  {q || status
+                    ? "검색 결과가 없습니다"
+                    : "등록된 이벤트가 없습니다"}
                 </TableCell>
               </TableRow>
             )}
@@ -190,47 +206,43 @@ export default function AdminEventsPage() {
         </Table>
       </div>
 
-      {/* 페이지네이션 */}
+      {/* 페이지네이션 (Link 기반 — 서버 컴포넌트 호환) */}
       {totalPages > 1 && (
-        <div
+        <nav
           className="flex items-center justify-center gap-1"
-          role="navigation"
           aria-label="페이지 이동"
         >
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-            className="text-xs"
-          >
-            이전
-          </Button>
-          {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-            <Button
-              key={page}
-              variant={currentPage === page ? "default" : "outline"}
-              size="sm"
-              onClick={() => setCurrentPage(page)}
-              className={cn(
-                "min-w-8 text-xs",
-                currentPage === page && "pointer-events-none",
-              )}
-              aria-current={currentPage === page ? "page" : undefined}
+          {currentPage > 1 && (
+            <Link
+              href={buildPageUrl(currentPage - 1)}
+              className="hover:bg-muted rounded border px-3 py-1.5 text-xs"
             >
-              {page}
-            </Button>
+              이전
+            </Link>
+          )}
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+            <Link
+              key={p}
+              href={buildPageUrl(p)}
+              aria-current={currentPage === p ? "page" : undefined}
+              className={
+                currentPage === p
+                  ? "bg-primary text-primary-foreground pointer-events-none rounded px-3 py-1.5 text-xs"
+                  : "hover:bg-muted rounded border px-3 py-1.5 text-xs"
+              }
+            >
+              {p}
+            </Link>
           ))}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-            disabled={currentPage === totalPages}
-            className="text-xs"
-          >
-            다음
-          </Button>
-        </div>
+          {currentPage < totalPages && (
+            <Link
+              href={buildPageUrl(currentPage + 1)}
+              className="hover:bg-muted rounded border px-3 py-1.5 text-xs"
+            >
+              다음
+            </Link>
+          )}
+        </nav>
       )}
     </div>
   );
