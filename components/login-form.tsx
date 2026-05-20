@@ -10,10 +10,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function LoginForm({
-  className,
-  ...props
-}: React.ComponentPropsWithoutRef<"div">) {
+interface LoginFormProps extends React.ComponentPropsWithoutRef<"div"> {
+  /** 로그인 성공 후 이동할 경로 (오픈 리다이렉트 방지: /invite/ 경로만 허용) */
+  nextPath?: string;
+}
+
+export function LoginForm({ className, nextPath, ...props }: LoginFormProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -32,8 +34,16 @@ export function LoginForm({
         password,
       });
       if (error) throw error;
-      // Update this route to redirect to an authenticated route. The user already has an active session.
-      router.push("/");
+
+      // 오픈 리다이렉트 방지: /invite/ 또는 /events/ 경로만 허용
+      if (
+        nextPath &&
+        (nextPath.startsWith("/invite/") || nextPath.startsWith("/events/"))
+      ) {
+        router.push(nextPath);
+      } else {
+        router.push("/");
+      }
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : "An error occurred");
     } finally {
@@ -45,7 +55,7 @@ export function LoginForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <div>
         <h1 className="text-2xl font-bold">로그인</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="text-muted-foreground mt-1 text-sm">
           이메일로 로그인하거나 Google 계정을 사용하세요
         </p>
       </div>
@@ -59,7 +69,7 @@ export function LoginForm({
           <span className="w-full border-t" />
         </div>
         <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-background px-2 text-muted-foreground">또는</span>
+          <span className="bg-background text-muted-foreground px-2">또는</span>
         </div>
       </div>
 

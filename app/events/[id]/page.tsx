@@ -35,6 +35,8 @@ import { RsvpBadge } from "@/components/common/RsvpBadge";
 import { MemberAvatar } from "@/components/common/MemberAvatar";
 import { EmptyState } from "@/components/common/EmptyState";
 import { CopyInviteLinkButton } from "@/components/events/CopyInviteLinkButton";
+import { JoinPublicEventButton } from "@/components/events/JoinPublicEventButton";
+import { RegenerateTokenButton } from "@/components/events/RegenerateTokenButton";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import type { EventWithDetails } from "@/lib/types/events";
@@ -65,8 +67,11 @@ interface EventDetailPageProps {
 /**
  * 이벤트 상세 데이터를 Supabase에서 조회합니다.
  * event + owner + event_members + invite_token + notices + settlements + carpools
+ * currentUserId: 현재 로그인 사용자 ID (비로그인 시 null)
  */
-async function fetchEventDetail(id: string): Promise<EventWithDetails | null> {
+async function fetchEventDetail(
+  id: string,
+): Promise<(EventWithDetails & { currentUserId: string | null }) | null> {
   const supabase = await createClient();
 
   // 이벤트 + owner 프로필 + 멤버 목록 조회
@@ -146,7 +151,8 @@ async function fetchEventDetail(id: string): Promise<EventWithDetails | null> {
     user_role: userRole,
     user_rsvp: userRsvp,
     invite_token: tokenData?.token ?? null,
-  } as EventWithDetails;
+    currentUserId: user?.id ?? null,
+  } as EventWithDetails & { currentUserId: string | null };
 }
 
 /**
@@ -283,13 +289,18 @@ export default async function EventDetailPage({
         )}
 
         {/* 버튼 행 */}
-        <div className="flex gap-2 pt-1">
+        <div className="flex flex-wrap gap-2 pt-1">
           {/* 초대 링크 복사 — Client Component */}
           {event.invite_token && (
             <CopyInviteLinkButton
               token={event.invite_token}
               className="flex-1"
             />
+          )}
+
+          {/* Owner 전용: 링크 재발급 버튼 */}
+          {event.user_role === "owner" && (
+            <RegenerateTokenButton eventId={event.id} />
           )}
 
           {/* 이벤트 수정 (주최자 전용) */}
@@ -299,6 +310,23 @@ export default async function EventDetailPage({
             </Button>
           )}
         </div>
+
+        {/* 공개 이벤트 비멤버 참여 영역 */}
+        {event.is_public && event.user_role === null && (
+          <div className="pt-1">
+            {event.currentUserId ? (
+              /* 로그인 + 비멤버 → 참여하기 버튼 */
+              <JoinPublicEventButton eventId={event.id} />
+            ) : (
+              /* 비로그인 → 로그인 후 참여 링크 */
+              <Button asChild variant="outline" size="sm" className="w-full">
+                <Link href={`/auth/login?next=/events/${event.id}`}>
+                  로그인 후 참여
+                </Link>
+              </Button>
+            )}
+          </div>
+        )}
       </section>
 
       <Separator />
