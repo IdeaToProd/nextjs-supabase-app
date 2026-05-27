@@ -61,7 +61,7 @@ export function LoginForm({ className, nextPath, ...props }: LoginFormProps) {
       </div>
 
       {/* Google OAuth 버튼 */}
-      <GoogleOAuthButton onError={setError} />
+      <GoogleOAuthButton onError={setError} nextPath={nextPath} />
 
       {/* 구분선 */}
       <div className="relative">

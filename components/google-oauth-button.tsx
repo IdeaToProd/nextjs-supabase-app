@@ -7,23 +7,29 @@ import { useState } from "react";
 interface GoogleOAuthButtonProps {
   /** 에러 발생 시 부모 컴포넌트로 메시지 전달 */
   onError?: (message: string) => void;
+  /** 로그인 성공 후 이동할 경로 */
+  nextPath?: string;
 }
 
 /**
  * Google OAuth 로그인 버튼
  * supabase.auth.signInWithOAuth를 통해 Google 인증 흐름을 시작합니다.
  */
-export function GoogleOAuthButton({ onError }: GoogleOAuthButtonProps) {
+export function GoogleOAuthButton({
+  onError,
+  nextPath,
+}: GoogleOAuthButtonProps) {
   const [isLoading, setIsLoading] = useState(false);
 
   const handleGoogleSignIn = async () => {
     const supabase = createClient();
     setIsLoading(true);
 
+    const destination = nextPath || "/";
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=/`,
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(destination)}`,
       },
     });
 
