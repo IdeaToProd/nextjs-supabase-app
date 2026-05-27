@@ -37,6 +37,8 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { CopyInviteLinkButton } from "@/components/events/CopyInviteLinkButton";
 import { JoinPublicEventButton } from "@/components/events/JoinPublicEventButton";
 import { RegenerateTokenButton } from "@/components/events/RegenerateTokenButton";
+import { RsvpChangeButtons } from "@/components/events/RsvpChangeButtons";
+import { KickMemberButton } from "@/components/events/KickMemberButton";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import type { EventWithDetails } from "@/lib/types/events";
@@ -426,14 +428,11 @@ export default async function EventDetailPage({
 
           {/* 본인 RSVP 변경 버튼 (멤버인 경우) */}
           {event.user_role && (
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="flex-1 text-xs">
-                참석으로 변경
-              </Button>
-              <Button variant="outline" size="sm" className="flex-1 text-xs">
-                불참으로 변경
-              </Button>
-            </div>
+            <RsvpChangeButtons
+              eventId={event.id}
+              currentRsvp={event.user_rsvp}
+              isPast={event.is_past}
+            />
           )}
 
           {/* 멤버 테이블 */}
@@ -444,6 +443,9 @@ export default async function EventDetailPage({
                   <TableHead className="text-xs">이름</TableHead>
                   <TableHead className="text-xs">역할</TableHead>
                   <TableHead className="text-xs">RSVP</TableHead>
+                  {isOwnerOrCoHost && (
+                    <TableHead className="text-xs">관리</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -472,6 +474,20 @@ export default async function EventDetailPage({
                       <TableCell className="py-2">
                         <RsvpBadge rsvp={member.rsvp_status} />
                       </TableCell>
+                      {isOwnerOrCoHost && (
+                        <TableCell className="py-2">
+                          {member.user_id !== event.currentUserId &&
+                            member.role !== "owner" &&
+                            (event.user_role === "owner" ||
+                              member.role === "participant") && (
+                              <KickMemberButton
+                                eventId={event.id}
+                                targetUserId={member.user_id}
+                                targetName={displayName}
+                              />
+                            )}
+                        </TableCell>
+                      )}
                     </TableRow>
                   );
                 })}

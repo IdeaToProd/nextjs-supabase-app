@@ -13,7 +13,12 @@ type MemberErrorCode =
   | "INVALID_TOKEN"
   | "ALREADY_MEMBER"
   | "CAPACITY_EXCEEDED"
-  | "FORBIDDEN";
+  | "FORBIDDEN"
+  | "EVENT_LOCKED"
+  | "INVALID_STATUS"
+  | "NOT_MEMBER"
+  | "CANNOT_KICK_SELF"
+  | "NOT_FOUND";
 
 /** 멤버 참여 에러 반환 타입 */
 interface MemberError {
@@ -363,4 +368,204 @@ export async function regenerateInviteToken(
   }
 
   return { token: newToken };
+}
+
+/**
+ * 본인의 RSVP 상태를 변경합니다.
+ * - 인증 확인
+ * - status 유효성 검증 (attending | absent | pending)
+ * - 멤버십 여부 확인
+ * - 이벤트 종료(24h 경과) 후 잠금 확인
+ * - event_members UPDATE
+ */
+export async function changeRsvp(
+  eventId: string,
+  status: string,
+): Promise<{ rsvpStatus: string } | MemberError> {
+  const supabase = await createClient();
+
+  // 로그인 사용자 확인
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return {
+      error: "로그인이 필요합니다.",
+      code: "UNAUTHENTICATED",
+    };
+  }
+
+  // RSVP 상태 유효성 검증
+  const validStatuses = ["attending", "absent", "pending"];
+  if (!validStatuses.includes(status)) {
+    return {
+      error: "유효하지 않은 RSVP 상태입니다.",
+      code: "INVALID_STATUS",
+    };
+  }
+
+  // 멤버십 확인
+  const { data: memberData, error: memberError } = await supabase
+    .from("event_members")
+    .select("id")
+    .eq("event_id", eventId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (memberError || !memberData) {
+    return {
+      error: "이 이벤트의 멤버가 아닙니다.",
+      code: "NOT_MEMBER",
+    };
+  }
+
+  // 이벤트 시작 시각 조회 → 24h 잠금 확인
+  const { data: eventData, error: eventError } = await supabase
+    .from("events")
+    .select("starts_at")
+    .eq("id", eventId)
+    .single();
+
+  if (eventError || !eventData) {
+    return {
+      error: "이벤트를 찾을 수 없습니다.",
+      code: "NOT_FOUND",
+    };
+  }
+
+  const startsAt = new Date(eventData.starts_at).getTime();
+  if (startsAt + 24 * 60 * 60 * 1000 < Date.now()) {
+    return {
+      error: "지난 이벤트의 RSVP는 변경할 수 없습니다.",
+      code: "EVENT_LOCKED",
+    };
+  }
+
+  // RSVP 상태 업데이트
+  const { error: updateError } = await supabase
+    .from("event_members")
+    .update({ rsvp_status: status })
+    .eq("event_id", eventId)
+    .eq("user_id", user.id);
+
+  if (updateError) {
+    return {
+      error: "RSVP 변경에 실패했습니다.",
+      code: "FORBIDDEN",
+    };
+  }
+
+  return { rsvpStatus: status };
+}
+
+/**
+ * 이벤트 멤버를 강퇴합니다.
+ * - 인증 확인
+ * - 자기 자신 강퇴 방지
+ * - 요청자 권한 확인 (owner 또는 co_host만 가능)
+ * - 대상 멤버 존재 확인
+ * - Owner 강퇴 불가 보호
+ * - Co-host는 participant만 강퇴 가능
+ * - event_members DELETE
+ */
+export async function kickMember(
+  eventId: string,
+  targetUserId: string,
+): Promise<{ kicked: true } | MemberError> {
+  const supabase = await createClient();
+
+  // 로그인 사용자 확인
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return {
+      error: "로그인이 필요합니다.",
+      code: "UNAUTHENTICATED",
+    };
+  }
+
+  // 자기 자신 강퇴 방지
+  if (targetUserId === user.id) {
+    return {
+      error: "자기 자신을 강퇴할 수 없습니다.",
+      code: "CANNOT_KICK_SELF",
+    };
+  }
+
+  // 요청자 역할 확인 (owner 또는 co_host만 강퇴 가능)
+  const { data: requesterMember, error: requesterError } = await supabase
+    .from("event_members")
+    .select("role")
+    .eq("event_id", eventId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (requesterError || !requesterMember) {
+    return {
+      error: "이 이벤트의 멤버가 아닙니다.",
+      code: "FORBIDDEN",
+    };
+  }
+
+  const requesterRole = requesterMember.role;
+  if (requesterRole !== "owner" && requesterRole !== "co_host") {
+    return {
+      error: "멤버를 강퇴할 권한이 없습니다.",
+      code: "FORBIDDEN",
+    };
+  }
+
+  // 대상 멤버 역할 확인
+  const { data: targetMember, error: targetError } = await supabase
+    .from("event_members")
+    .select("role")
+    .eq("event_id", eventId)
+    .eq("user_id", targetUserId)
+    .maybeSingle();
+
+  if (targetError || !targetMember) {
+    return {
+      error: "강퇴할 멤버를 찾을 수 없습니다.",
+      code: "NOT_FOUND",
+    };
+  }
+
+  const targetRole = targetMember.role;
+
+  // Owner 강퇴 불가 보호
+  if (targetRole === "owner") {
+    return {
+      error: "주최자는 강퇴할 수 없습니다.",
+      code: "FORBIDDEN",
+    };
+  }
+
+  // Co-host는 participant만 강퇴 가능 (co_host 해임은 owner 전용)
+  if (requesterRole === "co_host" && targetRole === "co_host") {
+    return {
+      error: "공동주최자 강퇴는 주최자만 할 수 있습니다.",
+      code: "FORBIDDEN",
+    };
+  }
+
+  // 멤버 강퇴 처리
+  const { error: deleteError } = await supabase
+    .from("event_members")
+    .delete()
+    .eq("event_id", eventId)
+    .eq("user_id", targetUserId);
+
+  if (deleteError) {
+    return {
+      error: "멤버 강퇴에 실패했습니다.",
+      code: "FORBIDDEN",
+    };
+  }
+
+  return { kicked: true };
 }
