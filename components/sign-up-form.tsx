@@ -38,7 +38,9 @@ export function SignUpForm({
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/protected`,
+          // /auth/confirm 라우트가 OTP 검증 후 /protected로 리다이렉트
+          // /protected 직접 지정 시 OTP 검증 단계가 누락되어 이메일 확인이 동작하지 않음
+          emailRedirectTo: `${window.location.origin}/auth/confirm?next=/protected`,
         },
       });
       if (error) throw error;
@@ -54,7 +56,7 @@ export function SignUpForm({
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <div>
         <h1 className="text-2xl font-bold">회원가입</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="text-muted-foreground mt-1 text-sm">
           새 계정을 만들거나 Google 계정으로 시작하세요
         </p>
       </div>
@@ -68,7 +70,7 @@ export function SignUpForm({
           <span className="w-full border-t" />
         </div>
         <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-background px-2 text-muted-foreground">또는</span>
+          <span className="bg-background text-muted-foreground px-2">또는</span>
         </div>
       </div>
 

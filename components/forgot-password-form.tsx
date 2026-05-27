@@ -31,9 +31,13 @@ export function ForgotPasswordForm({
     setError(null);
 
     try {
-      // The url which will be included in the email. This URL needs to be configured in your redirect URLs in the Supabase dashboard at https://supabase.com/dashboard/project/_/auth/url-configuration
+      // Supabase가 이 URL로 비밀번호 리셋 이메일을 전송합니다.
+      // - PKCE 방식: ?code=xxx 파라미터가 붙어서 도착 → next=/auth/update-password로 비밀번호 변경 페이지 이동
+      // - OTP 방식: ?token_hash=xxx&type=recovery 파라미터가 붙어서 도착 → type=recovery 감지 후 이동
+      // 주의: Supabase 대시보드 Authentication > URL Configuration > Redirect URLs에
+      //        이 주소가 등록되어 있어야 합니다.
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/auth/update-password`,
+        redirectTo: `${window.location.origin}/auth/confirm?next=/auth/update-password`,
       });
       if (error) throw error;
       setSuccess(true);
@@ -53,7 +57,7 @@ export function ForgotPasswordForm({
             <CardDescription>Password reset instructions sent</CardDescription>
           </CardHeader>
           <CardContent>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-muted-foreground text-sm">
               If you registered using your email and password, you will receive
               a password reset email.
             </p>
